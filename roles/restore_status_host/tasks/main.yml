@@ -1,0 +1,18 @@
+---
+- name: Filter MySQL hosts where inventory_hostname matches
+  set_fact:
+    mysql_processes: "{{ dba_automation_prod | filter_hosts(inventory_hostname, 'mysql') }}"
+
+- name: Filter Oracle hosts where inventory_hostname matches
+  set_fact:
+    oracle_processes: "{{ dba_automation_prod | filter_hosts(inventory_hostname, 'oracle') }}"
+
+- name: Display filtered MySQL processes
+  debug:
+    msg: "MySQL Process: Config: {{ item.config }}, Hosts: {{ item.hosts }}"
+  with_items: "{{ mysql_processes }}"
+
+- name: Display filtered Oracle processes
+  debug:
+    msg: "Oracle Process: Config: {{ item.config }}, Hosts: {{ item.hosts }}"
+  with_items: "{{ oracle_processes }}"

@@ -1,0 +1,115 @@
+---
+
+- name: Get human-readable datetime
+  ansible.builtin.command: date "+%Y-%m-%d %H:%M:%S"
+  register: datetime_output
+  delegate_to: localhost
+
+- name: Filter hosts and set dynamic log path for each host
+  set_fact:
+    filtered_data: "{{ (dba_automation_prod | combine(dba_automation_dev)) | filter_hosts(inventory_hostname, 'mysql') }}"
+
+- name: Set log path for each host dynamically
+  set_fact:
+    host_log_path: "{{ item.config.log_path | default(omit) }}"
+    tail_log: "{{ item.tail | default('Unknown') | default(omit) }}" 
+    dr_type: "{{ item.db_type | default(omit) }}" 
+    log_files_to_collect: "{{ item.config.log_files_to_collect | default([]) }}"
+  loop: "{{ filtered_data }}"
+  when: item.get('hosts', []) | select('match', inventory_hostname) | list | length > 0
+  delegate_to: localhost
+
+- name: Verify Oracle log files exist
+  ansible.builtin.stat:
+    path: "{{ host_log_path }}/{{ item }}"
+  register: log_file_status
+  loop: "{{ log_files_to_collect }}"
+  loop_control:
+    label: "{{ item }}"
+  when: log_files_to_collect | length > 0  # Only run if log_files_to_collect is not empty
+
+- name: Read and display content of each log file
+  ansible.builtin.shell: |
+    grep -E 'Import Release|Job "SYS"' {{ host_log_path }}/{{ item.item }} | tail -n 6
+  register: all_logs
+  with_items: "{{ log_file_status.results }}"
+  changed_when: false
+  when: 
+    - dr_type == 'oracle'
+
+- name: Append Logs To The File
+  include_tasks: test.yaml
+  when: 
+    - dr_type == 'oracle'
+  loop: "{{ all_logs.results }}"
+  loop_control:
+    loop_var: oracle_log
+
+# - name: Initialize logs_status
+#   ansible.builtin.set_fact:
+#     logs_status: []
+#   delegate_to: localhost
+#   run_once: true
+
+# # Step 3: Check for errors in logs
+# - name: Identify errors in logs oracle
+#   ansible.builtin.set_fact:
+#     logs_status: "{{ log_status_test + [{ 'file': item.item, 'status': log_status }] }}"
+#   vars:
+#     log_status_test: >-
+#       {% if not item.stdout_lines %}
+#       no logs found
+#       {% elif 'error' in (item.stdout_lines | join(' ') | lower) %}
+#       not ok
+#       {% elif 'fail' in (item.stdout_lines | join(' ') | lower) %}
+#       not ok
+#       {% elif 'exception' in (item.stdout_lines | join(' ') | lower) %}
+#       not ok
+#       {% else %}
+#       ok
+#       {% endif %}
+#   with_items: "{{ all_logs.results }}"
+#   delegate_to: localhost
+#   when:
+#     - dr_type == 'oracle'
+
+# - name: Display logs_status Variable
+#   debug:
+#     var: logs_status
+#   delegate_to: localhost
+
+
+# # Step 3: Display the collected logs
+# - name: Display the collected logs
+#   ansible.builtin.command: cat /tmp/all_logs_collected.txt
+#   delegate_to: localhost
+#   register: consolidated_logs
+#   run_once: true
+
+# - name: Display logs_status Variable
+#   debug:
+#     var: consolidated_logs.stdout_lines
+#   delegate_to: localhost
+
+# - name: Intialize restore_logs
+#   ansible.builtin.set_fact:
+#     restore_logs: []
+#   delegate_to: localhost
+#   run_once: true
+
+# # Step 4: Collect the status and logs for each host in a list
+# - name: Create a list of logs and statuses
+#   ansible.builtin.set_fact:
+#     restore_logs: "{{ [{'host': inventory_hostname, 'logs_status': logs_status, 'logs': consolidated_logs.stdout_lines }] }}"
+#   delegate_to: localhost
+#   run_once: true
+
+# - name: Set restore_status_result 
+#   ansible.builtin.set_fact:
+#     restore_status_result:
+#       success: true
+#       message: "Restore status completed successfully."
+
+# - name: restore_status_result Variable
+#   debug:
+#     var: restore_status_result

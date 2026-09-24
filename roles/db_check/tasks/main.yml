@@ -1,0 +1,66 @@
+---
+
+- name: Install pip3
+  ansible.builtin.package:
+    name: python3-pip
+    state: present
+  become: yes
+  become_user: "bharat"
+
+- name: Install PyMySQL using pip3
+  ansible.builtin.pip:
+    name: pymysql
+    state: present
+  become: yes
+  become_user: "bharat"
+
+
+- name: Get MySQL version using mysql_query module
+  community.mysql.mysql_query:
+    login_user: "root"
+    query: "SELECT VERSION();"
+  become: yes
+  become_user: "bharat"
+  register: query_result
+
+
+# - name: Get MySQL version using mysql CLI
+#   ansible.builtin.shell: "mysql --login-path=root -e 'SELECT VERSION();' -s -N"
+#   become_user: "bharat"
+#   register: query_result
+
+- name: Show MySQL version
+  ansible.builtin.debug:
+    msg: "MySQL version on {{ inventory_hostname }}: {{ query_result.stdout }}"
+
+- name: Get MySQL binary path
+  ansible.builtin.command: "which mysql"
+  register: mysql_path
+
+- name: Show MySQL binary path
+  ansible.builtin.debug:
+    msg: "MySQL binary path on {{ inventory_hostname }}: {{ mysql_path.stdout }}"
+
+- name: Show MySQL version
+  ansible.builtin.debug:
+    msg: "MySQL version on {{ inventory_hostname }}: {{ query_result.stdout }}"
+
+
+- name: Convert query results to CSV
+  ansible.builtin.copy:
+    dest: "{{ output_file }}"
+    content: |
+      {% for row in query_result.stdout %}
+      {% for key, value in row.items() %}
+      {{ key }}: {{ value }}{% if not loop.last %}, {% endif %}
+      {% endfor %}
+      {% if not loop.last %}\n{% endif %}
+      {% endfor %}
+  when: query_result.stdout | length > 0
+  delegate_to: "{{ inventory_hostname }}"
+
+- name: Print message
+  ansible.builtin.debug:
+    msg: "Query results saved to {{ output_file }}"
+  when: query_result.results | length > 0
+  delegate_to: "{{ inventory_hostname }}"

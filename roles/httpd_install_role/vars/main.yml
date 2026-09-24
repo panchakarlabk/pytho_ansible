@@ -1,0 +1,4 @@
+---
+# vars file for ariba_install_role
+pck: httpd
+pck2: nginx

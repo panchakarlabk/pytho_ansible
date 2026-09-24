@@ -1,0 +1,191 @@
+---
+
+- name: Get human-readable datetime
+  ansible.builtin.command: date "+%Y-%m-%d %H:%M:%S"
+  register: datetime_output
+  delegate_to: localhost
+
+- name: Set log path for each host dynamically
+  set_fact:
+    host_log_path: "{{ item.0.config.log_path }}"
+    tail_log: "{{ item.0.tail | default(omit) }}"
+    dr_type: "{{ item.0.db_type | default(omit) }}"
+  with_subelements:
+    - "{{ lookup('vars', 'dba_automation_' + env) | dict2items | map(attribute='value') | list }}"
+    - hosts
+  when: 
+    - inventory_hostname is match(item.1 | replace('*', '.*'))
+    - item.0.db_type is defined and item.0.db_type == 'mysql'
+  delegate_to: localhost
+
+- name: Display the log path for each host
+  debug:
+    msg: 
+      - "Log path for {{ inventory_hostname }} is {{ host_log_path }}"
+      - "dr_type {{ dr_type }}"
+
+- name: Initialize the tail command
+  set_fact:
+    tail_cmd: >-
+      {% if tail_log is defined %}
+      tail -n {{ tail_log }} {{ host_log_path }} 
+      {% else %}
+      tail {{ host_log_path }} | grep "$(date +%Y/%m/%d)"
+      {% endif %}
+  when: 
+    - host_log_path is defined
+    - dr_type == "mysql"
+  delegate_to: localhost
+
+###Working
+- name: Display the constructed tail command
+  debug:
+    msg: "Constructed tail command: {{ tail_cmd }}"
+  when: 
+    - host_log_path is defined
+    - dr_type == "mysql"
+  delegate_to: localhost
+
+# Step 1: Collect logs and append them to a single file
+- name: Daily Monitor Logs DR PE restore log status
+  ansible.builtin.shell: "{{ tail_cmd }}"
+  ignore_errors: yes  # Continue even if there are issues
+  register: all_logs
+  when: 
+    - host_log_path is defined
+    - dr_type == "mysql"
+
+- name: Get current date and time
+  ansible.builtin.shell: date "+%Y-%m-%d %H:%M:%S"
+  register: current_time
+  changed_when: false
+
+- name: Debug all_logs.stdout_lines
+  ansible.builtin.debug:
+    msg: "all_logs.stdout_lines: {{ all_logs }}"
+
+- name: Extract job completion timestamp (success or error)
+  ansible.builtin.set_fact:
+    log_timestamp: >-
+      {% set success_lines = all_logs.stdout_lines | select('search', 'Job .* successfully completed at') | list %}
+      {% set error_lines = all_logs.stdout_lines | select('search', 'Job .* completed with .* error') | list %}
+      {% if success_lines | length > 0 %}
+        {{ success_lines[-1] | regex_replace('.* successfully completed at ', '') | regex_replace(' elapsed.*', '') }}
+      {% elif error_lines | length > 0 %}
+        {{ error_lines[-1] | regex_replace('.* completed with .* error\(s\) at ', '') | regex_replace(' elapsed.*', '') }}
+      {% else %}
+        ""
+      {% endif %}
+  delegate_to: localhost
+
+- name: Convert log_timestamp to ansible_date_time.date format
+  ansible.builtin.set_fact:
+    formatted_log_timestamp: "{{ (log_timestamp | trim | to_datetime('%a %b %d %H:%M:%S %Y')).timestamp() | int }}"
+
+- name: Debug Extract log timestamp from logs
+  ansible.builtin.debug:
+    msg: "log_timestamp: {{ formatted_log_timestamp }}"
+
+- name: Set expected restore time with today's date if not provided with a date
+  ansible.builtin.set_fact:
+    expected_restore_datetime: "{{ ((ansible_date_time.date + ' ' + expected_restore_time) | to_datetime('%Y-%m-%d %H:%M')).timestamp() | int }}"
+  when: expected_restore_time is defined
+
+- name: Compare log timestamp with expected restore time
+  ansible.builtin.set_fact:
+    restore_status: >-
+      {% if formatted_log_timestamp >= expected_restore_datetime %}
+      ok
+      {% else %}
+      not ok
+      {% endif %}
+
+
+# Step 3: Check for errors in logs
+- name: Identify errors in logs
+  ansible.builtin.set_fact:
+    logs_status: >-
+      {% if not all_logs.stdout_lines %}
+      no logs found
+      {% elif 'error' in (all_logs.stdout_lines | join(' ') | lower) %}
+      not ok
+      {% elif 'fail' in (all_logs.stdout_lines | join(' ') | lower) %}
+      not ok
+      {% elif 'exception' in (all_logs.stdout_lines | join(' ') | lower) %}
+      not ok
+      {% else %}
+      ok
+      {% endif %}
+  delegate_to: localhost
+  ignore_errors: yes  # Continue even if there are issues
+  when: all_logs.stdout_lines is defined
+
+- name: Initialize current_host_name with a fallback
+  set_fact:
+    current_host_name: "{{ inventory_hostname }}"  # Default value if it's not defined
+  when: current_host_name is not defined
+
+- name: Replace current_host_name with friendlyname if inventory_hostname matches
+  set_fact:
+    current_host_name: "{{ item.friendlyname if item.friendlyname is defined else inventory_hostname }}"
+  when: 
+    - inventory_hostname is match(item.hostname | replace('*', '.*'))
+    - item.friendlyname is defined
+  loop: "{{ dba_host_list }}"
+  loop_control:
+    label: "{{ item.hostname }}"
+  delegate_to: localhost
+
+- name: current_host_name 
+  debug:
+    var: current_host_name
+
+- name: Append logs with CET time
+  ansible.builtin.shell: |
+    echo -e "DR PE {{ ansible_date_time.iso8601 }}" >> /tmp/all_logs_collected.txt
+    echo -e "host {{ current_host_name }}" >> /tmp/all_logs_collected.txt
+    echo -e "Status {{ logs_status }}" >> /tmp/all_logs_collected.txt
+    if [ -z "{{ all_logs.stdout_lines | join('') }}" ]; then
+      echo -e "No logs collected as of {{ ansible_date_time.iso8601 }}" >> /tmp/all_logs_collected.txt
+    else
+      echo -e "{{ all_logs.stdout_lines | join('\n') }}" >> /tmp/all_logs_collected.txt
+    fi
+    echo -e "End of logs from {{ current_host_name }}\n" >> /tmp/all_logs_collected.txt
+  when: 
+    - all_logs.stdout_lines is defined
+  delegate_to: localhost
+
+# Step 5: Display the collected logs
+- name: Display the collected logs
+  ansible.builtin.command: cat /tmp/all_logs_collected.txt
+  delegate_to: localhost
+  register: consolidated_logs
+  run_once: true
+  when: 
+    - all_logs.stdout_lines is defined
+
+- name: Intialize restore_logs
+  ansible.builtin.set_fact:
+    restore_logs: []
+  delegate_to: localhost
+
+# Step 4: Collect the status and logs for each host in a list
+- name: Create a list of logs and statuses
+  ansible.builtin.set_fact:
+    restore_logs: "{{ [{'host': inventory_hostname, 'logs_status': logs_status, 'logs': consolidated_logs.stdout_lines }] }}"
+  when: 
+    - logs_status is defined
+    - consolidated_logs is defined
+    - consolidated_logs.stdout_lines is defined
+  delegate_to: localhost
+
+- name: Set restore_status_result 
+  ansible.builtin.set_fact:
+    restore_status_result:
+      success: true
+      message: "Restore status completed successfully."
+
+- name: restore_status_result Variable
+  debug:
+    var: restore_status_result
+

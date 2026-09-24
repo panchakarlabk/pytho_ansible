@@ -1,0 +1,30 @@
+---
+- name: Render the email body template
+  template:
+    src: email_template.j2
+    dest: /tmp/email_body.txt
+  delegate_to: localhost
+  # run_once: true
+
+- name: Display the collected logs
+  ansible.builtin.command: cat /tmp/email_body.txt
+  delegate_to: localhost
+  register: emaul_body_logs
+  run_once: true
+
+- name: See Email Body File Txt
+  debug:
+    var: emaul_body_logs
+
+- name: Send email notification
+  community.general.mail:
+    host: smtp.gmail.com
+    port: 587
+    username: "{{ email_username }}"
+    password: "{{ email_password }}"
+    to: "{{ email_recipient }}"
+    subject: "{{ email_subject }}"
+    body: "{{ lookup('file', '/tmp/email_body.txt') }}"
+    subtype: html
+  run_once: true
+  delegate_to: localhost

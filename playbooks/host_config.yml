@@ -1,0 +1,80 @@
+dba_host_list:
+  - hostname: 192.168.162.128
+    friendlyname: "rokcy host"
+  - hostname: 192.168.162.136
+    friendlyname: "rhel 9 host"
+
+dba_automation_prod:
+  process_001_mysql:
+    config:
+      log_path: "/home/bharat/logs/logs.txt"
+    hosts:
+      - 192.168.162.136
+    db_type: mysql
+    tail: 25
+  process_002_mysql:
+    config:
+      log_path: "/home/bharat/logs/logs.txt"
+    hosts:
+      - 192.168.162.128
+    tail: 25
+    db_type: mysql
+  process_002_orecle:
+    config:
+      log_path: "/home/bharat/logs"  # Base directory where logs are stored
+      log_files_to_collect:
+        - logs1.txt
+        - logs2.txt
+        - logs3.txt
+    db_type: oracle
+    hosts:
+      - 192.168.162.129
+  process_003_orecle:
+    config:
+      log_path: "/home/bharat/logs"  # Base directory where logs are stored
+      log_files_to_collect:
+        - logs5.txt
+        - logs6.txt
+        - logs7.txt
+    db_type: oracle
+    hosts:
+      - 192.168.162.124
+
+dba_automation_dev:
+  process_001_mysql:
+    config:
+      log_path: "/home/admin/logs.txt"
+    hosts:
+      - 10.100.152.166
+  process_001_mysql:
+    config:
+      log_path: "/home/bharat/logs/logs.txt"
+    hosts:
+      - 192.168.162.130
+  process_002_orecle:
+    config:
+      log_path: "/home/bharat/logs.log"
+    hosts:
+      - 192.168.162.135
+  process_003_orecle:
+    config:
+      log_path: "/home/bharat/logs"  # Base directory where logs are stored
+      log_files_to_collect:
+        - log1
+        - log2
+        - log2
+    db_type: oracle
+    hosts:
+      - 192.168.162.136
+
+ignore_alerts_rules:
+  - code: "rule_001"
+    decription: "dummy stuff not DBA topic"
+    ignore_if:
+      - monitorObjectName: "DatabaseServer*"
+  - code: "rule_002"
+    decription: "app/business alerts"
+    ignore_if:
+      - resourceTemplateName: "Apache*"
+  
+
