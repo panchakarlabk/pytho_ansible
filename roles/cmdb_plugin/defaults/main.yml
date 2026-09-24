@@ -1,0 +1,3 @@
+---
+# Default path to the sample CMDB file (relative to playbook dir if used as-is)
+cmdb_plugin_cmdb_file: "roles/cmdb_plugin/files/cmdb.json"
